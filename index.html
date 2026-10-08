@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E2A40">
+<title>Washlet Remote</title>
+<style>
+:root{--k:1;--bg:#f4f6f8;--fg:#1b1f23;--card:#fff;--muted:#6b7280;--green:#1B6B5A;--grey:#9AA0A6;--amber:#B26A00;--red:#D93025;--learn:#F9A825;--bar:#0E2A40}
+@media (prefers-color-scheme:dark){:root{--bg:#10151a;--fg:#e8eaed;--card:#1b232b;--muted:#9aa4af}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding:0 12px calc(24px + env(safe-area-inset-bottom));max-width:560px;margin:0 auto}
+header{position:sticky;top:0;background:var(--bg);padding:calc(6px + env(safe-area-inset-top)) 0 4px;z-index:5}
+.row{display:flex;gap:8px;align-items:center}
+#status{flex:1;font-size:13px;min-height:34px;display:flex;align-items:center}
+button{font:inherit;border:0;border-radius:10px;cursor:pointer;color:#fff;background:var(--green)}
+#btnConnect{padding:8px 12px;background:var(--bar);white-space:nowrap}
+#btnMenu{width:38px;height:38px;font-size:22px;background:var(--bar);padding:0}
+.learn{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px}
+.learn input{width:44px;height:24px;accent-color:var(--learn)}
+.hint{font-size:11px;color:var(--muted);margin:0 0 6px}
+#grid{display:grid;grid-template-columns:repeat(6,1fr);gap:calc(8px*var(--k)) calc(8px*var(--k))}
+.key{height:calc(44px*var(--k));border-radius:10px;padding:2px 4px;font-size:calc(12px*var(--k));line-height:1.2;white-space:pre-line;word-break:break-word;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.key:active{filter:brightness(.88)}
+.step{min-width:0;text-align:center}
+.step .ttl{font-size:calc(12px*var(--k));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none;-webkit-user-select:none}
+.step .lbl{font-size:calc(15px*var(--k));letter-spacing:2px;line-height:1.2;padding:1px 0 5px;user-select:none;-webkit-user-select:none;white-space:nowrap}
+.step .ln{display:flex;justify-content:center;gap:calc(20px*var(--k))}
+.step .pm{flex:0 0 calc(56px*var(--k));height:calc(36px*var(--k));font-size:calc(20px*var(--k));padding:0;border-radius:10px}
+.step .pm.dim{opacity:.4}
+.step.full{display:flex;align-items:center;gap:6px}
+.step.full{margin:14px 0 6px}
+.step.full .pm{flex:1 1 0;height:calc(50px*var(--k))}
+.step.full .mid{flex:2 1 0;min-width:0}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.dlg{background:var(--card);color:var(--fg);border-radius:14px;max-width:420px;width:100%;max-height:85vh;overflow:auto;padding:16px}
+.dlg h3{margin:0 0 8px;font-size:17px}
+.dlg p{margin:0 0 12px;white-space:pre-line}
+.dlg input[type=text],.dlg input[type=tel],.dlg input[type=password]{width:100%;padding:10px;font-size:16px;border-radius:8px;border:1px solid rgba(128,128,128,.5);background:var(--bg);color:var(--fg);margin-bottom:12px}
+.item{display:block;width:100%;text-align:left;background:transparent;color:var(--fg);border-bottom:1px solid rgba(128,128,128,.25);border-radius:0;padding:13px 4px}
+.btns{display:flex;justify-content:flex-end;gap:8px}
+.btns button{padding:10px 16px;background:transparent;color:var(--green);font-weight:600}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;z-index:60;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center}
+#warn{display:none;background:#fff3cd;color:#664d03;border-radius:10px;padding:10px;margin:8px 0;font-size:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><div id="status">Chưa ghép thiết bị</div><button id="btnConnect">Ghép thiết bị</button><button id="btnMenu" aria-label="Menu">⋮</button></div>
+  <label class="learn"><input type="checkbox" id="swLearn"><span>Chế độ học: bấm phím trên app, rồi bấm phím tương ứng trên remote gốc</span></label>
+</header>
+<div id="warn"></div>
+<div class="hint">Xám = chưa có mã. Giữ lâu một phím để mở menu (đặt mức, học lại, đổi tên, xóa).</div>
+<div id="grid"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+// ===== Hằng số giao thức (khớp firmware_washlet.ino và app Android) =====
+const SVC = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHR = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const IDLE_MS = 30000;          // tự ngắt kết nối khi không dùng (mili giây)
+const SYNC_ID = 20;
+
+// ===== Bảng phím (khớp tools/make_presets.py và MainActivity.kt) =====
+const K = {SINGLE:0, TOGGLE2:1, STEP_ABS:2, STEP_TRANS:3, SYNC:4};
+const key = (id, name, kind = K.SINGLE, o = {}) => Object.assign({id, name, kind, levels: 0, states: [], upText: "Tăng", downText: "Giảm", defLevel: 0, stateOnly: false, resetOnOpen: false, shift: 1}, o);
+const keys = [
+  key(0, "STOP"), key(1, "Dry"), key(2, "E-water"),
+  key(3, "Xả Đại"), key(4, "Xả Tiểu"), key(5, "Pulsating"),
+  key(6, "Nozzle\nOscillation"), key(7, "Manual\nCleaning"), key(8, "SEAT\nOpen/Close"),
+  key(9, "LID\nOpen/Close"),
+  key(10, "REAR", K.TOGGLE2, {stateOnly: true, states: ["REAR", "SOFT\nREAR"]}),
+  key(11, "FRONT", K.TOGGLE2, {stateOnly: true, states: ["FRONT", "SOFT\nFRONT"]}),
+  key(12, "Auto\nOpen/Close", K.TOGGLE2, {states: ["Bật", "Tắt"]}),
+  key(13, "Auto\nFlush", K.TOGGLE2, {states: ["Bật", "Tắt"]}),
+  key(14, "Energy Save", K.TOGGLE2, {states: ["Bật", "Tắt"]}),
+  key(15, "Pressure", K.STEP_TRANS, {levels: 5, defLevel: 5, resetOnOpen: true}),
+  key(16, "Nozzle Position", K.STEP_TRANS, {levels: 5, upText: "Vòi ra", downText: "Vòi vào", defLevel: 5, resetOnOpen: true}),
+  key(17, "Water Temp", K.STEP_ABS, {levels: 6, shift: 0}),
+  key(18, "Seat Temp", K.STEP_ABS, {levels: 6, shift: 0}),
+  key(19, "Dryer Temp", K.STEP_ABS, {levels: 5}),
+  key(20, "Sync Washlet", K.SYNC)
+];
+const isStep = k => k.kind === K.STEP_ABS || k.kind === K.STEP_TRANS;
+const keyOf = id => keys.find(k => k.id === id);
+const requiredSlots = k => k.kind === K.TOGGLE2 ? 2 : k.kind === K.STEP_ABS ? k.levels : k.kind === K.STEP_TRANS ? 2 * (k.levels - 1) : 1;
+const upSlot = (k, lv) => lv >= k.levels - 1 ? -1 : (k.kind === K.STEP_ABS ? lv + 1 : lv);
+const downSlot = (k, lv) => lv <= 0 ? -1 : (k.kind === K.STEP_ABS ? lv - 1 : 2 * (k.levels - 1) - lv);
+
+// ===== Lưu trữ (localStorage, có dự phòng trong bộ nhớ) =====
+const mem = {};
+const store = {
+  get(k, d = null) { try { const v = localStorage.getItem("wl_" + k); return v === null ? (k in mem ? mem[k] : d) : v; } catch (e) { return k in mem ? mem[k] : d; } },
+  set(k, v) { mem[k] = String(v); try { localStorage.setItem("wl_" + k, String(v)); } catch (e) {} },
+  del(k) { delete mem[k]; try { localStorage.removeItem("wl_" + k); } catch (e) {} }
+};
+const getToken = () => store.get("token");
+const getDevId = () => store.get("devId");
+const isPaired = () => !!getToken() && !!getDevId();
+const isOwnerSaved = () => store.get("owner") === "1";
+const phoneName = () => store.get("phoneName") || ((navigator.platform || "Phone").replace(/[^A-Za-z0-9 -]/g, "").trim().slice(0, 12) || "Phone");
+const nameOf = k => store.get("n" + k.id, k.name);
+const levelOf = k => Math.min(Math.max(parseInt(store.get("lv" + k.id, k.defLevel)) || 0, 0), Math.max(0, k.levels - 1));
+const setLevel = (k, lv) => store.set("lv" + k.id, Math.min(Math.max(lv, 0), Math.max(0, k.levels - 1)));
+const nextOf = k => (parseInt(store.get("tg" + k.id, 0)) || 0) ? 1 : 0;
+const setNext = (k, n) => { store.set("tg" + k.id, n ? 1 : 0); store.set("tgk" + k.id, 1); };
+const knownOf = k => store.get("tgk" + k.id) === "1";
+function toggleText(k) {
+  if (!knownOf(k)) return nameOf(k);
+  const cur = k.states[1 - nextOf(k)];
+  return k.stateOnly ? cur : nameOf(k).replace(/\n/g, " ") + "\n" + cur;
+}
+
+// ===== Mặt nạ ô mã (ô nào đã có mã trên ESP32) =====
+const masks = new Array(32).fill(0);
+const defaultMask = k => k.id === 9 ? 0 : (1 << requiredSlots(k)) - 1;
+function loadMask() {
+  const s = store.get("masks");
+  const arr = s ? s.split(",").map(x => parseInt(x)) : null;
+  for (const k of keys) masks[k.id] = (arr && arr.length === 32 && !isNaN(arr[k.id])) ? arr[k.id] : defaultMask(k);
+}
+const saveMasks = () => store.set("masks", masks.join(","));
+const hasSlot = (id, slot) => id >= 0 && id <= 31 && slot >= 0 && slot <= 7 && ((masks[id] >> slot) & 1) === 1;
+const hasAll = k => { for (let i = 0; i < requiredSlots(k); i++) if (!hasSlot(k.id, i)) return false; return true; };
+const hasAny = k => { for (let i = 0; i < requiredSlots(k); i++) if (hasSlot(k.id, i)) return true; return false; };
+
+// ===== Các bước học cho từng loại phím =====
+function wizardSteps(k) {
+  const nm = nameOf(k).replace(/\n/g, " "), up = k.upText, dn = k.downText, n = k.levels - 1;
+  const st = (text, slot = -1, multi = false) => ({text, slot, multi});
+  switch (k.kind) {
+    case K.SINGLE: return [st(`Hướng remote gốc vào mắt thu rồi bấm phím "${nm}" 1 lần (15 giây).`, 0)];
+    case K.SYNC: return [st("Hướng remote gốc vào mắt thu rồi bấm phím STOP 5–6 lần liên tiếp. Xong thì ngừng 4 giây.", 0, true)];
+    case K.TOGGLE2: return [
+      st(`Lần 1/2: bấm phím "${nm}" trên remote gốc 1 lần (trạng thái ${k.states[0].replace(/\n/g, " ")}).`, 0),
+      st(`Lần 2/2: bấm đúng phím đó thêm 1 lần nữa (trạng thái ${k.states[1].replace(/\n/g, " ")}).`, 1)];
+    case K.STEP_TRANS: {
+      const a = [st(`Trên remote gốc, đưa "${nm}" về mức THẤP NHẤT (bấm ${dn.toLowerCase()} nhiều lần). Xong bấm "Xong".`)];
+      for (let i = 0; i < n; i++) a.push(st(`${up} lần ${i + 1}/${n}: bấm phím "${up}" trên remote gốc 1 lần.`, i));
+      for (let i = 0; i < n; i++) a.push(st(`${dn} lần ${i + 1}/${n}: bấm phím "${dn}" trên remote gốc 1 lần.`, n + i));
+      return a;
+    }
+    default: {
+      const a = [st(`Trên remote gốc, đưa "${nm}" về mức THẤP NHẤT (bấm ${dn.toLowerCase()} nhiều lần). Xong bấm "Xong".`)];
+      for (let i = 1; i <= n; i++) a.push(st(`${up} lần ${i}/${n}: bấm phím "${up}" trên remote gốc 1 lần.`, i));
+      a.push(st(`Bây giờ bấm "${dn}" trên remote gốc ${n - 1} lần (KHÔNG học) để về mức 1. Xong bấm "Xong".`));
+      a.push(st(`Bấm "${dn}" trên remote gốc 1 lần nữa để xuống mức thấp nhất.`, 0));
+      return a;
+    }
+  }
+}
+
+// ===== Trạng thái kết nối =====
+let st = "IDLE";            // IDLE | CONNECTING | AUTHING | READY
+let device = null, server = null, chr = null;
+let pendingCmd = null, enrollPin = null, recoveryCode = null, justEnrolled = false, closeReason = null;
+let learningId = -1, wizKey = null, wizSteps = [], wizIdx = 0;
+let outQ = [], writing = false, idleTimer = null, forcePicker = false;
+let listItems = [];
+const enc = s => new TextEncoder().encode(s);
+const dec = v => new TextDecoder().decode(v);
+
+// ===== Giao diện =====
+const $ = id => document.getElementById(id);
+const tvStatus = $("status"), btnConnect = $("btnConnect"), btnMenu = $("btnMenu"), swLearn = $("swLearn"), grid = $("grid");
+const setStatus = s => { tvStatus.textContent = s; };
+let toastTimer = null;
+function toast(s) { const t = $("toast"); t.textContent = s; t.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.opacity = 0, 2200); }
+
+function modal({title, message, input, items, buttons, cancelable = true}) {
+  const ov = document.createElement("div"); ov.className = "ov";
+  const d = document.createElement("div"); d.className = "dlg"; ov.appendChild(d);
+  const close = () => ov.remove();
+  if (title) { const h = document.createElement("h3"); h.textContent = title; d.appendChild(h); }
+  if (message) { const p = document.createElement("p"); p.textContent = message; d.appendChild(p); }
+  let inp = null;
+  if (input) {
+    inp = document.createElement("input"); inp.type = input.type || "text"; inp.value = input.value || ""; inp.placeholder = input.hint || "";
+    if (input.numeric) inp.inputMode = "numeric";
+    if (input.maxLength) inp.maxLength = input.maxLength;
+    inp.autocomplete = "off"; d.appendChild(inp);
+  }
+  if (items) items.forEach(it => { const b = document.createElement("button"); b.className = "item"; b.textContent = it.text; b.onclick = () => { close(); it.cb && it.cb(); }; d.appendChild(b); });
+  const bar = document.createElement("div"); bar.className = "btns";
+  (buttons || []).forEach(b => { const x = document.createElement("button"); x.textContent = b.text; x.onclick = () => { close(); b.cb && b.cb(inp ? inp.value.trim() : null); }; bar.appendChild(x); });
+  d.appendChild(bar);
+  if (cancelable) ov.addEventListener("click", e => { if (e.target === ov) close(); });
+  document.body.appendChild(ov);
+  if (inp) setTimeout(() => inp.focus(), 50);
+  return close;
+}
+
+const views = {};
+function addLongPress(el, fn) {
+  let t = null, fired = false;
+  const start = () => { fired = false; t = setTimeout(() => { fired = true; fn(); }, 550); };
+  const stop = () => clearTimeout(t);
+  el.addEventListener("pointerdown", start);
+  ["pointerup", "pointerleave", "pointercancel", "pointermove"].forEach(ev => el.addEventListener(ev, stop));
+  el.addEventListener("contextmenu", e => { e.preventDefault(); });
+  el.addEventListener("click", e => { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); fired = false; } }, true);
+}
+
+// Bố cục màn hình: mỗi dòng là danh sách id phím. Phím thường chia đều bề ngang dòng,
+// phím nhiều mức (−/+) chiếm trọn một dòng. Đổi thứ tự phím chỉ cần sửa bảng này.
+const layoutRows = [
+  [0, 20],        // STOP | Sync Washlet
+  [10, 1, 11],    // REAR | Dry | FRONT
+  [6, 5, 7],      // Nozzle Oscillation | Pulsating | Manual Cleaning
+  [15, 16],       // Pressure | Nozzle Position
+  [17, 18],       // Water Temp | Seat Temp
+  [19],           // Dryer Temp (cả dòng)
+  [3, 4, 2],      // Xả Đại | Xả Tiểu | E-water
+  [8, 9, 14],     // SEAT | LID | Energy Save
+  [12, 13]        // Auto Open/Close | Auto Flush
+];
+
+function buildGrid() {
+  for (const row of layoutRows) for (const id of row) {
+    const k = keyOf(id); if (!k) continue;
+    const span = 6 / row.length;
+    if (isStep(k)) {
+      const half = span < 6;
+      const rowEl = document.createElement("div"); rowEl.className = "step" + (half ? "" : " full");
+      rowEl.style.gridColumn = "span " + span;
+      const ttl = document.createElement("div"); ttl.className = "ttl";
+      const label = document.createElement("div"); label.className = "lbl";
+      const minus = document.createElement("button"); minus.className = "pm"; minus.textContent = "−";
+      const plus = document.createElement("button"); plus.className = "pm"; plus.textContent = "+";
+      minus.onclick = () => stepMove(k, -1);
+      plus.onclick = () => stepMove(k, +1);
+      const openLevel = () => swLearn.checked ? onKeyClick(k) : showLevelDialog(k);
+      label.onclick = openLevel; ttl.onclick = openLevel;
+      [minus, plus, label, ttl].forEach(v => addLongPress(v, () => showKeyMenu(k)));
+      if (half) {
+        const ln = document.createElement("div"); ln.className = "ln"; ln.append(minus, plus);
+        rowEl.append(ttl, label, ln);
+      } else {
+        const mid = document.createElement("div"); mid.className = "mid"; mid.append(ttl, label);
+        rowEl.append(minus, mid, plus);
+      }
+      grid.appendChild(rowEl);
+      views[k.id] = {minus, plus, label, ttl};
+    } else {
+      const b = document.createElement("button"); b.className = "key";
+      b.style.gridColumn = "span " + span;
+      b.onclick = () => onKeyClick(k);
+      addLongPress(b, () => showKeyMenu(k));
+      grid.appendChild(b); views[k.id] = {b};
+    }
+  }
+}
+
+function titleText(k) { return nameOf(k).replace(/\n/g, " "); }
+function dotsText(k) { const lv = levelOf(k); let d = []; for (let i = 0; i < k.levels; i++) d.push(i <= lv ? "●" : "○"); return d.join(" "); }
+
+function refreshAll() {
+  const paired = isPaired();
+  for (const k of keys) {
+    let bg, fg = "#fff";
+    if (!paired) bg = "#9AA0A6";
+    else if (k.id === learningId || (wizKey && k.id === wizKey.id)) { bg = "#F9A825"; fg = "#000"; }
+    else if (hasAll(k) && k.id === 0) bg = "#D93025";
+    else if (hasAll(k)) bg = "#1B6B5A";
+    else if (hasAny(k)) bg = "#B26A00";
+    else bg = "#9AA0A6";
+    const v = views[k.id];
+    if (v.label) {
+      const tint = hasAll(k) ? "#1B6B5A" : "#9AA0A6";
+      v.ttl.textContent = titleText(k); v.ttl.style.color = tint;
+      v.label.textContent = dotsText(k); v.label.style.color = tint;
+      v.plus.classList.toggle("dim", upSlot(k, levelOf(k)) < 0);
+      v.minus.classList.toggle("dim", downSlot(k, levelOf(k)) < 0);
+      for (const b of [v.minus, v.plus]) { b.style.background = bg; b.style.color = fg; }
+    } else {
+      v.b.textContent = k.kind === K.TOGGLE2 ? toggleText(k) : nameOf(k);
+      v.b.style.background = bg; v.b.style.color = fg;
+    }
+  }
+  btnConnect.textContent = st !== "IDLE" ? "Dừng kết nối" : paired ? "Kết nối" : "Ghép thiết bị";
+}
+
+// ===== Thao tác phím =====
+function onKeyClick(k) {
+  if (!isPaired()) { toast('Chưa ghép thiết bị. Bấm "Ghép thiết bị".'); return; }
+  if (swLearn.checked) return startWizard(k);
+  if (k.kind === K.SYNC) return syncTap(k);
+  if (k.kind === K.TOGGLE2) {
+    const slot = nextOf(k);
+    return hasSlot(k.id, slot) ? sendOrConnect(`S${k.id}.${slot}`) : toast('Chưa có mã cho trạng thái này. Bật "Chế độ học" để học.');
+  }
+  if (hasSlot(k.id, 0)) sendOrConnect(`S${k.id}.0`); else toast('Phím chưa có mã. Bật "Chế độ học" để học.');
+}
+
+function stepMove(k, dir) {
+  if (!isPaired()) { toast('Chưa ghép thiết bị. Bấm "Ghép thiết bị".'); return; }
+  if (swLearn.checked) return startWizard(k);
+  const lv = levelOf(k), slot = dir > 0 ? upSlot(k, lv) : downSlot(k, lv);
+  if (slot < 0) toast(dir > 0 ? "Đã ở mức cao nhất" : "Đã ở mức thấp nhất (chạm giữa nhãn để chỉnh mức hiện tại)");
+  else if (!hasSlot(k.id, slot)) toast('Chưa có mã cho bước này. Bật "Chế độ học" để học.');
+  else sendOrConnect(`S${k.id}.${slot}`);
+}
+
+function applySent(k, slot) {
+  if (k.kind === K.STEP_ABS) setLevel(k, slot);
+  else if (k.kind === K.STEP_TRANS) { const n = k.levels - 1; setLevel(k, slot < n ? slot + 1 : 2 * n - slot - 1); }
+  else if (k.kind === K.TOGGLE2) setNext(k, (slot + 1) % 2);
+}
+
+function showLevelDialog(k) {
+  const abs = k.kind === K.STEP_ABS, cur = levelOf(k);
+  const items = [];
+  for (let i = 0; i < k.levels; i++) items.push({text: `Mức ${i + k.shift}/${k.levels - 1 + k.shift}` + (i === cur ? "  (hiện tại)" : ""), cb: () => {
+    if (abs && isPaired() && hasSlot(k.id, i)) sendOrConnect(`S${k.id}.${i}`); else { setLevel(k, i); refreshAll(); }
+  }});
+  modal({title: abs ? `${nameOf(k)}: chọn mức (sẽ phát mã)` : `${nameOf(k)}: cho app biết mức hiện tại (không phát IR)`, items, buttons: [{text: "Đóng"}]});
+}
+
+function syncTap(k) {
+  if (!hasSlot(0, 0) || !hasSlot(SYNC_ID, 0)) { toast(`Cần mã của phím "${nameOf(keys[0])}" và phím này. Bật Chế độ học để học.`); return; }
+  sendOrConnect("Y");   // ESP32 tự phát STOP 4 lần + mã đồng bộ
+  setStatus(`${nameOf(k)}: đang gửi...`);
+}
+
+// ===== Học từng bước =====
+function startWizard(k) {
+  if (!isPaired()) { toast("Chưa ghép thiết bị"); return; }
+  wizKey = k; wizSteps = wizardSteps(k); wizIdx = 0; showWizardStep();
+}
+const sendLearnCmd = (k, s) => sendOrConnect((s.multi ? "M" : "L") + k.id + "." + s.slot);
+function showWizardStep() {
+  const k = wizKey; if (!k) return;
+  if (wizIdx >= wizSteps.length) { wizKey = null; setStatus(`Đã học xong "${nameOf(k).replace(/\n/g, " ")}"`); refreshAll(); return; }
+  const s = wizSteps[wizIdx];
+  if (wizSteps.length === 1) { sendLearnCmd(k, s); return; }
+  modal({
+    title: `Học "${nameOf(k).replace(/\n/g, " ")}" (bước ${wizIdx + 1}/${wizSteps.length})`, message: s.text, cancelable: false,
+    buttons: [
+      {text: "Hủy", cb: () => { wizKey = null; if (learningId >= 0 && st === "READY") enqueue("C"); refreshAll(); }},
+      {text: s.slot >= 0 ? "Bắt đầu học" : "Xong", cb: () => { if (s.slot >= 0) sendLearnCmd(k, s); else { wizIdx++; showWizardStep(); } }}
+    ]
+  });
+  refreshAll();
+}
+
+function showKeyMenu(k) {
+  const items = [];
+  items.push({text: "Đổi tên", cb: () => askText("Đổi tên phím", nameOf(k).replace(/\n/g, " "), t => { store.set("n" + k.id, t); refreshAll(); })});
+  items.push({text: "Học lại (từng bước)", cb: () => startWizard(k)});
+  items.push({text: "Xóa mã đã học (về mã mẫu)", cb: () => isPaired() ? sendOrConnect("D" + k.id) : toast("Chưa ghép thiết bị")});
+  if (k.kind === K.TOGGLE2) items.push({text: "Đặt trạng thái hiện tại...", cb: () => modal({
+    title: "Washlet đang ở trạng thái nào?", items: k.states.map((s, w) => ({text: s.replace(/\n/g, " "), cb: () => { setNext(k, 1 - w); refreshAll(); }})), buttons: [{text: "Đóng"}]})});
+  if (isStep(k)) items.push({text: "Đặt mức hiện tại...", cb: () => showLevelDialog(k)});
+  modal({title: nameOf(k).replace(/\n/g, " "), items, buttons: [{text: "Đóng"}]});
+}
+
+function askText(title, initial, cb) {
+  modal({title, input: {value: initial}, buttons: [{text: "Hủy"}, {text: "OK", cb: v => { if (v) cb(v); }}]});
+}
+function askPin(cb, onCancel) {
+  modal({title: "Nhập PIN", input: {hint: "PIN 6 số trên tem", numeric: true, maxLength: 6, type: "tel"}, cancelable: false, buttons: [
+    {text: "Hủy", cb: () => onCancel && onCancel()},
+    {text: "Ghép", cb: v => { if (/^\d{6}$/.test(v)) cb(v); else { toast("PIN gồm 6 số"); onCancel && onCancel(); } }}]});
+}
+
+function showMenu() {
+  const items = [];
+  if (!isPaired()) items.push({text: "Ghép thiết bị mới (nhập PIN)", cb: () => askPin(beginEnroll)});
+  else {
+    if (isOwnerSaved()) {
+      items.push({text: "Cho phép thêm điện thoại (2 phút)", cb: () => sendOrConnect("W")});
+      items.push({text: "Danh sách điện thoại đã ghép", cb: () => { listItems = []; sendOrConnect("V"); }});
+    }
+    items.push({text: "Đổi tên thiết bị này", cb: () => askText("Tên thiết bị này", phoneName(), n => {
+      const clean = n.replace(/[^\p{L}\p{N} -]/gu, "").slice(0, 12) || "Phone"; store.set("phoneName", clean); sendOrConnect("N " + clean); })});
+    items.push({text: "Quên thiết bị trên máy này", cb: () => modal({title: "Quên thiết bị?", message: "Máy này sẽ không điều khiển được nữa cho tới khi ghép lại.", buttons: [
+      {text: "Hủy"}, {text: "Quên", cb: () => { if (st !== "IDLE") disconnectGatt(null); ["token", "devId", "owner"].forEach(x => store.del(x)); device = null; refreshAll(); setStatus("Đã quên thiết bị"); }}]})});
+  }
+  items.push({text: "Khôi phục bằng mã khôi phục", cb: () => askText("Mã khôi phục (trên thẻ trong hộp)", "", beginRecovery)});
+  modal({title: "Thiết bị", items, buttons: [{text: "Đóng"}]});
+}
+
+function showDeviceList() {
+  if (!listItems.length) { setStatus("Chưa có điện thoại nào"); return; }
+  modal({title: "Điện thoại đã ghép (chạm để xóa)", items: listItems.map(it => ({text: it.name + (it.owner ? " (chủ)" : ""), cb: () => {
+    if (it.owner) toast("Không xóa được chủ. Đổi chủ: dùng mã khôi phục.");
+    else modal({title: `Xóa "${it.name}"?`, buttons: [{text: "Hủy"}, {text: "Xóa", cb: () => sendOrConnect("R " + it.idx)}]});
+  }})), buttons: [{text: "Đóng"}]});
+}
+
+// ===== Ghép / khôi phục =====
+function beginEnroll(pin) {
+  if (st !== "IDLE") { toast("Đang kết nối, hãy ngắt trước"); return; }
+  enrollPin = pin; recoveryCode = null; forcePicker = true; startConnect();
+}
+function beginRecovery(code) {
+  const c = code.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (c.length !== 10) { toast("Mã khôi phục gồm 10 ký tự"); return; }
+  if (st === "READY") { recoveryCode = c; enqueue("X " + c); }
+  else if (st === "IDLE") { enrollPin = null; recoveryCode = c; forcePicker = !device; startConnect(); }
+  else toast("Đang kết nối, thử lại sau");
+}
+
+// ===== BLE (Web Bluetooth) =====
+function sendOrConnect(cmd) {
+  if (st === "READY") enqueue(cmd);
+  else { pendingCmd = cmd; if (st === "IDLE") startConnect(); }
+}
+
+async function startConnect() {
+  if (!navigator.bluetooth) {
+    setStatus("Trình duyệt này không hỗ trợ Web Bluetooth. iPhone: dùng ứng dụng Bluefy. Android/PC: dùng Chrome.");
+    enrollPin = null; recoveryCode = null; pendingCmd = null; return;
+  }
+  st = "CONNECTING"; setStatus("Đang kết nối..."); refreshAll();
+  try {
+    let dev = null;
+    const savedId = getDevId();
+    if (!forcePicker && !enrollPin && savedId) {
+      if (device && device.id === savedId) dev = device;
+      else if (navigator.bluetooth.getDevices) {
+        try { const l = await navigator.bluetooth.getDevices(); dev = l.find(d => d.id === savedId) || null; } catch (e) {}
+      }
+    }
+    if (!dev) {
+      setStatus("Chọn thiết bị washlet trong danh sách...");
+      dev = await navigator.bluetooth.requestDevice({filters: [{services: [SVC]}]});
+    }
+    forcePicker = false;
+    device = dev;
+    device.removeEventListener("gattserverdisconnected", onDisc);
+    device.addEventListener("gattserverdisconnected", onDisc);
+    setStatus("Đang kết nối...");
+    const connect = device.gatt.connect();
+    server = await Promise.race([connect, new Promise((_, rj) => setTimeout(() => rj(new Error("timeout")), 12000))]);
+    const svc = await server.getPrimaryService(SVC);
+    chr = await svc.getCharacteristic(CHR);
+    chr.removeEventListener("characteristicvaluechanged", onNotify);
+    chr.addEventListener("characteristicvaluechanged", onNotify);
+    await chr.startNotifications();
+    startAuth();
+  } catch (e) {
+    const cancelled = e && (e.name === "NotFoundError" || e.name === "AbortError");
+    if (!cancelled) forcePicker = true;   // lần sau mở lại danh sách chọn thiết bị
+    const msg = cancelled ? "Đã hủy chọn thiết bị" : "Không kết nối được. Lại gần washlet và thử lại.";
+    server = null; chr = null;
+    try { device && device.gatt.connected && device.gatt.disconnect(); } catch (_) {}
+    cleanupAfterClose(msg);
+  }
+}
+
+function startAuth() {
+  st = "AUTHING"; refreshAll();
+  const tk = getToken();
+  if (enrollPin) enqueue("A " + enrollPin);
+  else if (recoveryCode) enqueue("X " + recoveryCode);
+  else if (tk) enqueue("H " + tk);
+  else disconnectGatt("Chưa ghép thiết bị");
+}
+
+function disconnectGatt(reason) {
+  clearTimeout(idleTimer);
+  closeReason = reason;
+  if (device && device.gatt && device.gatt.connected) { try { device.gatt.disconnect(); } catch (e) {} setTimeout(() => { if (st !== "IDLE") cleanupAfterClose(closeReason); }, 1500); }
+  else cleanupAfterClose(reason);
+}
+function onDisc() { const was = st === "READY"; cleanupAfterClose(closeReason || (was ? "Đã ngắt kết nối (bấm phím sẽ tự kết nối lại)" : null)); }
+function cleanupAfterClose(reason) {
+  clearTimeout(idleTimer);
+  const wasReady = st === "READY";
+  server = null; chr = null; outQ = []; writing = false; learningId = -1; wizKey = null;
+  pendingCmd = null; enrollPin = null; recoveryCode = null; justEnrolled = false; closeReason = null;
+  const was = st; st = "IDLE";
+  if (was === "IDLE" && !reason) { refreshAll(); return; }
+  setStatus(reason || (wasReady ? "Đã ngắt kết nối (bấm phím sẽ tự kết nối lại)" : "Không kết nối được. Lại gần washlet và thử lại."));
+  refreshAll();
+}
+
+function enqueue(cmd) { outQ.push(cmd); drain(); resetIdle(); }
+async function drain() {
+  if (writing || !chr || !outQ.length) return;
+  writing = true;
+  const c = outQ.shift();
+  try { await (chr.writeValueWithResponse ? chr.writeValueWithResponse(enc(c)) : chr.writeValue(enc(c))); }
+  catch (e) { setStatus("Gửi lệnh thất bại, thử lại"); }
+  writing = false; drain();
+}
+function resetIdle() { clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (st === "READY") disconnectGatt("Đã ngắt tự động khi không dùng (bấm phím sẽ tự kết nối lại)"); }, IDLE_MS); }
+
+// ===== Nhận thông báo từ ESP32 =====
+const onNotify = e => handleNotify(dec(e.target.value));
+function onAuthed(owner) {
+  st = "READY"; store.set("owner", owner ? "1" : "0");
+  enrollPin = null; recoveryCode = null;
+  setStatus(justEnrolled ? "Ghép thành công" + (owner ? " (bạn là chủ)" : "") : "Đã kết nối");
+  if (justEnrolled) { enqueue("N " + phoneName()); justEnrolled = false; }
+  enqueue("Q");
+  if (pendingCmd) { enqueue(pendingCmd); pendingCmd = null; }
+  refreshAll();
+}
+function onError(code) {
+  const M = {PIN: "PIN sai", LOCKED: "Nhập sai nhiều lần, thiết bị khóa 5 phút", CLOSED: 'Thiết bị đã có chủ. Nhờ chủ chọn "Cho phép thêm điện thoại" rồi thử lại',
+    FULL: "Đã đủ 5 điện thoại. Nhờ chủ xóa bớt", TOKEN: "Máy này không còn được phép. Hãy ghép lại bằng PIN", AUTH: "Chưa xác thực", OWNER: "Việc này chỉ chủ mới làm được",
+    NOPROV: "Thiết bị chưa được nạp mã", RECOV: "Mã khôi phục sai", BADSIGNAL: "Tín hiệu quá ngắn/dài hoặc nhiễu. Bấm lại, đưa remote gần mắt thu hơn", BUSY: "Đang học, chưa phát được"};
+  const msg = M[code] || "Lỗi: " + code;
+  if (code === "TOKEN") { store.del("token"); store.del("owner"); disconnectGatt(msg); }
+  else if (["PIN", "LOCKED", "CLOSED", "FULL", "RECOV", "NOPROV"].includes(code)) { if (st !== "READY") disconnectGatt(msg); else setStatus(msg); }
+  else setStatus(msg);
+}
+function handleNotify(msg) {
+  resetIdle();
+  const p = msg.trim().split(" ");
+  const rest = p.slice(3).join(" ");
+  const id = parseInt(p[1]); const idv = isNaN(id) ? -1 : id;
+  const kk = keyOf(idv); const name = kk ? nameOf(kk).replace(/\n/g, " ") : "";
+  switch (p[0]) {
+    case "T": store.set("token", p[1]); store.set("devId", device ? device.id : ""); enrollPin = null; justEnrolled = true; break;
+    case "OK": onAuthed(p[1] === "1"); break;
+    case "RESET":
+      store.del("token"); store.del("owner"); recoveryCode = null; enrollPin = null; st = "AUTHING"; clearTimeout(idleTimer);
+      setStatus("Đã khôi phục. Nhập PIN để ghép lại."); refreshAll();
+      askPin(pin => { enrollPin = pin; enqueue("A " + pin); }, () => disconnectGatt(null)); break;
+    case "ERR": onError(p[1] || ""); break;
+    case "K": { const start = parseInt(p[1]); const hex = p[2] || ""; for (let i = 0; i < Math.floor(hex.length / 2); i++) { const kid = start + i, m = parseInt(hex.substr(i * 2, 2), 16); if (kid >= 0 && kid <= 31 && !isNaN(m)) masks[kid] = m; } break; }
+    case "KEND": saveMasks(); break;
+    case "LEARNING": learningId = idv; setStatus(kk && kk.kind === K.SYNC ? "Hướng remote gốc vào mắt thu, bấm phím STOP gốc 5–6 lần liên tiếp (xong thì ngừng 4 giây)" : "Hướng remote gốc vào mắt thu và bấm phím tương ứng (15 giây)"); break;
+    case "PRESS": setStatus(`Đã nhận ${p[1]} lần bấm... tiếp tục bấm hoặc ngừng 4 giây để kết thúc`); break;
+    case "INFO": setStatus(`Đã học "${name}" (${p[3]} khung tín hiệu)`); break;
+    case "LEARNED": {
+      learningId = -1; const slot = parseInt(p[2]) || 0;
+      if (idv >= 0 && idv <= 31 && slot >= 0 && slot <= 7) { masks[idv] |= (1 << slot); saveMasks(); }
+      setStatus(`Đã học "${name}"`);
+      if (wizKey && wizKey.id === idv && wizIdx < wizSteps.length && wizSteps[wizIdx].slot === slot) { wizIdx++; const wk = wizKey; setTimeout(() => { if (wizKey === wk) showWizardStep(); }, 400); }
+      break; }
+    case "TIMEOUT": learningId = -1; setStatus(`Hết giờ, không nhận được tín hiệu cho "${name}"`); if (wizKey) { const wk = wizKey; setTimeout(() => { if (wizKey === wk) showWizardStep(); }, 400); } break;
+    case "CANCEL": learningId = -1; wizKey = null; setStatus("Đã hủy học"); break;
+    case "SENT": { const slot = parseInt(p[2]) || 0; if (kk) applySent(kk, slot); setStatus(`Đã phát "${name}"`); break; }
+    case "NOKEY": { const slot = parseInt(p[2]) || 0; if (idv >= 0 && idv <= 31 && slot >= 0 && slot <= 7) { masks[idv] &= ~(1 << slot); saveMasks(); } setStatus(`"${name}" chưa có mã cho ô này`); break; }
+    case "DELETED": setStatus(`Đã xóa mã đã học của "${name}"`); break;
+    case "WOPEN": setStatus('Đã mở 2 phút: thiết bị mới nhập PIN để ghép (chọn "Ghép thiết bị").'); break;
+    case "V": { const i = parseInt(p[1]); if (!isNaN(i)) listItems.push({idx: i, owner: p[2] === "o", name: rest || "?"}); break; }
+    case "VEND": showDeviceList(); break;
+    case "REMOVED": setStatus("Đã xóa điện thoại khỏi danh sách"); break;
+  }
+  refreshAll();
+}
+
+// ===== Khởi động =====
+btnConnect.onclick = () => {
+  if (st !== "IDLE") disconnectGatt("Đã ngắt kết nối");
+  else if (isPaired()) startConnect();
+  else askPin(beginEnroll);
+};
+btnMenu.onclick = showMenu;
+swLearn.onchange = () => {
+  if (!swLearn.checked) { wizKey = null; if (learningId >= 0 && st === "READY") enqueue("C"); }
+  else if (!isPaired()) { swLearn.checked = false; toast("Hãy ghép thiết bị trước"); }
+};
+for (const k of keys) if (k.resetOnOpen) setLevel(k, k.defLevel);   // mỗi lần mở trang đặt lại mức mặc định
+loadMask(); buildGrid(); refreshAll();
+setStatus(isPaired() ? "Đã ghép. Bấm phím để điều khiển." : "Chưa ghép thiết bị");
+if (!navigator.bluetooth) {
+  const w = $("warn"); w.style.display = "block";
+  w.textContent = "Trình duyệt này không hỗ trợ Web Bluetooth. Trên iPhone hãy mở trang này bằng ứng dụng Bluefy. Trên Android hoặc máy tính hãy dùng Chrome hoặc Edge.";
+}
+if (!window.isSecureContext) { const w = $("warn"); w.style.display = "block"; w.textContent = "Trang cần mở bằng địa chỉ https:// (hoặc localhost) thì Bluetooth mới hoạt động."; }
+
+// Tự co giãn theo màn hình: chuẩn 390x780 px, giới hạn 0.85–1.3 (đặt K = 1 để tắt)
+function fitScale() {
+  const k = Math.max(0.85, Math.min(1.3, Math.min(innerWidth / 390, innerHeight / 780)));
+  document.documentElement.style.setProperty("--k", k.toFixed(3));
+}
+fitScale(); addEventListener("resize", fitScale);
+</script>
+</body>
+</html>
